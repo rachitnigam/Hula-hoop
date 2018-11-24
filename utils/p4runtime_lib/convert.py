@@ -74,7 +74,7 @@ def encode(x, bitwidth):
     elif type(x) == int:
         encoded_bytes = encodeNum(x, bitwidth)
     else:
-        raise Exception("Encoding objects of %r is not supported" % type(x))
+        raise Exception("Encoding objects of %r is not supported: element %r" % (type(x), x))
     assert (len(encoded_bytes) == byte_len), ("Encoded length is %d, expected %d" % (len(encoded_bytes), byte_len))
     return encoded_bytes
 

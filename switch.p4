@@ -5,12 +5,25 @@
 typedef bit<9>  egressSpec_t;
 typedef bit<48> macAddr_t;
 typedef bit<32> ip4Addr_t;
+typedef bit<9> port_id_t;
+typedef bit<8> util_t;
+typedef bit<24> tor_id_t;
+typedef bit<48> time_t;
 
-const bit<16> TYPE_MYTUNNEL = 0x1212;
+/* Constants about the topology and switches. */
+const port_id_t NUM_PORTS = 255;
+const tor_id_t NUM_TORS = 512;
+const bit<32> EGDE_HOSTS = 4;
+
+/* Declaration for the various packet types. */
 const bit<16> TYPE_IPV4 = 0x800;
 const bit<8> TYPE_HULA = 0x42;
 const bit<32> MAX_TUNNEL_ID = 1 << 16;
 const bit<32> MULTICAST = 0xe0000001;
+
+/* Tracking things for flowlets */
+const time_t FLOWLET_TOUT = 3000;
+const time_t KEEP_ALIVE_THRESH = 10000;
 
 /*************************************************************************
 *********************** H E A D E R S  ***********************************
@@ -25,11 +38,6 @@ header ethernet_t {
     macAddr_t dstAddr;
     macAddr_t srcAddr;
     bit<16>   etherType;
-}
-
-header myTunnel_t {
-    bit<16> proto_id;
-    bit<16> dst_id;
 }
 
 header ipv4_t {
@@ -55,7 +63,6 @@ struct metadata {
 
 struct headers {
     ethernet_t   ethernet;
-    myTunnel_t   myTunnel;
     ipv4_t       ipv4;
     hula_t       hula;
 }
@@ -76,15 +83,6 @@ parser MyParser(packet_in packet,
     state parse_ethernet {
         packet.extract(hdr.ethernet);
         transition select(hdr.ethernet.etherType) {
-            TYPE_MYTUNNEL: parse_myTunnel;
-            TYPE_IPV4: parse_ipv4;
-            default: accept;
-        }
-    }
-
-    state parse_myTunnel {
-        packet.extract(hdr.myTunnel);
-        transition select(hdr.myTunnel.proto_id) {
             TYPE_IPV4: parse_ipv4;
             default: accept;
         }
@@ -122,7 +120,22 @@ control MyIngress(inout headers hdr,
                   inout metadata meta,
                   inout standard_metadata_t standard_metadata) {
 
-    bit<48> curr_time = standard_metadata.ingress_global_timestamp;
+    /****** Registers to keep track of utilization. *******/
+
+    // Keep track of the port utilization
+    register<util_t>((bit<32>) NUM_PORTS) port_util;
+    // Keep track of the last time port utilization was updated for a dst_tor
+    register<time_t>((bit<32>) NUM_TORS) update_time;
+    // Best hop for for each tor
+    register<port_id_t>((bit<32>) NUM_TORS) best_hop;
+    // Last time a packet from a flowlet was observed.
+    register<time_t>((bit<32>) 1024) flowlet_time;
+    // The next hop a flow should take.
+    register<port_id_t>((bit<32>) 1024) flowlet_hop;
+    // Keep track of the minimum utilized path
+    register<util_t>((bit<32>) NUM_TORS) min_path_util;
+
+    /******************************************************/
 
     counter(MAX_TUNNEL_ID, CounterType.packets_and_bytes) ingressTunnelCounter;
     counter(MAX_TUNNEL_ID, CounterType.packets_and_bytes) egressTunnelCounter;
@@ -131,75 +144,92 @@ control MyIngress(inout headers hdr,
         mark_to_drop();
     }
 
-    action ipv4_forward(macAddr_t dstAddr, egressSpec_t port) {
-        standard_metadata.egress_spec = port;
-        hdr.ethernet.srcAddr = hdr.ethernet.dstAddr;
-        hdr.ethernet.dstAddr = dstAddr;
-        hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
+    /*
+    action hula_logic(ipv4_t ipv4_header, hula_t hula_hdr) {
+        time_t curr_time = standard_metadata.ingress_global_timestamp;
+        bit<32> dst_tor = (bit<32>) hula_hdr.dst_tor;
+
+        util_t tx_util;
+        port_util.read(tx_util, (bit<32>) standard_metadata.ingress_port);
+
+        // Process a HULA probe
+        if (ipv4_header.protocol == TYPE_HULA) {
+            util_t mpu; time_t up_time;
+            min_path_util.read(mpu, dst_tor);
+            update_time.read(up_time, dst_tor);
+
+            if(hula_hdr.path_util < tx_util) hula_hdr.path_util = tx_util;
+
+            if(hula_hdr.path_util < hula_hdr.path_util ||
+               curr_time - up_time > KEEP_ALIVE_THRESH) {
+
+                min_path_util.write(dst_tor, hula_hdr.path_util);
+                best_hop.write(dst_tor, standard_metadata.ingress_port);
+                update_time.write(dst_tor, curr_time);
+            }
+
+            min_path_util.read(mpu, dst_tor);
+            hdr.hula.path_util = mpu;
+        }
+        else {
+        }
+    }
+    */
+
+    /***** Implement mapping from dstAddr to dst_tor ********/
+    // Uses the destination address to compute the destination tor and the id of
+    // current switch. The table is configured by the control plane.
+    action set_dst_tor(tor_id_t dst_tor, tor_id_t self_id) {
+        meta.dst_tor = (bit<32>) dst_tor;
+        meta.self_id = (bit<32>) self_id;
     }
 
-    action myTunnel_ingress(bit<16> dst_id) {
-        hdr.myTunnel.setValid();
-        hdr.myTunnel.dst_id = dst_id;
-        hdr.myTunnel.proto_id = hdr.ethernet.etherType;
-        hdr.ethernet.etherType = TYPE_MYTUNNEL;
-        ingressTunnelCounter.count((bit<32>) hdr.myTunnel.dst_id);
+    // Used when matching a probe packet.
+    action dummy_dst_tor() {
+        meta.dst_tor = 0;
+        meta.self_id = 1;
     }
 
-    action myTunnel_forward(egressSpec_t port) {
-        standard_metadata.egress_spec = port;
-    }
-
-    action myTunnel_egress(macAddr_t dstAddr, egressSpec_t port) {
-        standard_metadata.egress_spec = port;
-        hdr.ethernet.dstAddr = dstAddr;
-        hdr.ethernet.etherType = hdr.myTunnel.proto_id;
-        hdr.myTunnel.setInvalid();
-        egressTunnelCounter.count((bit<32>) hdr.myTunnel.dst_id);
-    }
-
-    table ipv4_lpm {
-        key = {
-            hdr.ipv4.dstAddr: lpm;
+    table get_dst_tor {
+        key= {
+          hdr.ipv4.dstAddr: exact;
         }
         actions = {
-            ipv4_forward;
-            myTunnel_ingress;
-            NoAction();
-            drop;
+          set_dst_tor;
+          dummy_dst_tor;
         }
-        size = 1024;
-        default_action = NoAction();
+        default_action = dummy_dst_tor;
     }
 
-    table myTunnel_exact {
+    /***********************/
+
+    /********* Implement forwarding for edge nodes. ********/
+    action simple_forward(egressSpec_t port) {
+        standard_metadata.egress_spec = port;
+    }
+
+    table edge_forward {
         key = {
-            hdr.myTunnel.dst_id: exact;
+          hdr.ipv4.dstAddr: exact;
         }
         actions = {
-            myTunnel_forward;
-            myTunnel_egress;
-            drop;
+          simple_forward;
+          drop;
         }
-        size = 1024;
+        size = EGDE_HOSTS;
         default_action = drop();
     }
 
+    /******************************************************/
+
     apply {
         drop();
-        if (hdr.hula.isValid() || hdr.ipv4.isValid() && hdr.ipv4.dstAddr == MULTICAST) {
+        get_dst_tor.apply();
+        if (hdr.hula.isValid()) {
           standard_metadata.mcast_grp = (bit<16>)standard_metadata.ingress_port;
         }
-        else if (hdr.ipv4.isValid() && !hdr.myTunnel.isValid()) {
-            // Process only non-tunneled IPv4 packets.
-            ipv4_lpm.apply();
-        }
-        if (hdr.myTunnel.isValid()) {
-            // Process all tunneled packets.
-            myTunnel_exact.apply();
-        }
-        if (hdr.ipv4.ttl < 0) {
-         drop();
+        if (meta.dst_tor == meta.self_id) {
+            edge_forward.apply();
         }
     }
 }
@@ -245,7 +275,6 @@ control MyComputeChecksum(inout headers  hdr, inout metadata meta) {
 control MyDeparser(packet_out packet, in headers hdr) {
     apply {
         packet.emit(hdr.ethernet);
-        packet.emit(hdr.myTunnel);
         packet.emit(hdr.ipv4);
         packet.emit(hdr.hula);
     }

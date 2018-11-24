@@ -22,7 +22,10 @@ stop:
 
 build: dirs $(compiled_json)
 
-$(BUILD_DIR)/%.json: %.p4
+build/:
+	mkdir build
+
+$(BUILD_DIR)/%.json: %.p4 | build/
 	$(P4C) --p4v 16 $(P4C_ARGS) -o $@ $<
 
 dirs:

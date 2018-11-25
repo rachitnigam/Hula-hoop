@@ -30,11 +30,14 @@ bind_layers(IP, Hula, proto=0x42)
 def main():
 
     iface = get_if()
+    hw_if = get_if_hwaddr(iface)
 
     print "sending probe on interface %s." % (iface)
-    pkt =  Ether(src=get_if_hwaddr(iface), dst='ff:ff:ff:ff:ff:ff')
+    pkt =  Ether(src=hw_if, dst='ff:ff:ff:ff:ff:ff')
     pkt = pkt / IP(dst="224.0.0.1", proto=66)
-    pkt = pkt / Hula(dst_tor=0, path_util=256)
+
+    dt = int(pkt[IP].src.split(".")[2])
+    pkt = pkt / Hula(dst_tor=dt, path_util=256)
     pkt = pkt / Raw("probe packet")
     pkt.show2()
     sendp(pkt, iface=iface, verbose=False)

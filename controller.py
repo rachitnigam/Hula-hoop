@@ -122,7 +122,30 @@ def install_smart_mcast(mn_topo, switches, p4info_helper):
         write_simple_switch_config(switch, command)
     run_mcast_commands(mn_topo.switches())
 
+def install_hula_logic(mn_topo, switches, p4info_helper):
+    for sw in mn_topo.switches():
+        add_hula_handle_probe = p4info_helper.buildTableEntry(
+            table_name="MyIngress.hula_logic",
+            match_fields = {
+                "hdr.ipv4.protocol": 0x42
+            },
+            action_name = "MyIngress.hula_handle_probe",
+            action_params = {
+        })
+        add_hula_handle_data_packet = p4info_helper.buildTableEntry(
+            table_name="MyIngress.hula_logic",
+            match_fields = {
+                "hdr.ipv4.protocol": 0x06
+            },
+            action_name = "MyIngress.hula_handle_data_packet",
+            action_params = {
+        })
+        switches[sw].WriteTableEntry(add_hula_handle_probe, debug)
+        switches[sw].WriteTableEntry(add_hula_handle_data_packet, debug)
+
 def install_tables(mn_topo, switches, p4info_helper):
+    # Install entries for hula_logic
+    install_hula_logic(mn_topo, switches, p4info_helper)
     # Install rule to map each host to dst_tor
     for (x, y) in mn_topo.links():
         switch = None
@@ -139,6 +162,7 @@ def install_tables(mn_topo, switches, p4info_helper):
         dst_tor_num = int(switch[1:])
         port = mn_topo.port(switch, host)[0]
 
+        # Install entries for edge forwarding.
         add_edge_forward = p4info_helper.buildTableEntry(
             table_name="MyIngress.edge_forward",
             match_fields = {
@@ -152,6 +176,7 @@ def install_tables(mn_topo, switches, p4info_helper):
 
         for sw in mn_topo.switches():
             self_id = int(sw[1:])
+            # Install entries to calculate get_dst_tor
             add_host_dst_tor = p4info_helper.buildTableEntry(
                 table_name="MyIngress.get_dst_tor",
                 match_fields = {
@@ -163,6 +188,7 @@ def install_tables(mn_topo, switches, p4info_helper):
                     "self_id": self_id
                 })
             switches[sw].WriteTableEntry(add_host_dst_tor, debug)
+
 
 
 def main(p4info_file_path, bmv2_file_path, topo_file_path):
@@ -184,7 +210,7 @@ def main(p4info_file_path, bmv2_file_path, topo_file_path):
                                                     bmv2_json_file_path=bmv2_file_path)
             print "Installed P4 Program using SetForwardingPipelineConfig on %s" % bmv2_switch.name
 
-        # install_smart_mcast(mn_topo, switches, p4info_helper)
+        install_smart_mcast(mn_topo, switches, p4info_helper)
         install_tables(mn_topo, switches, p4info_helper)
 
     except KeyboardInterrupt:

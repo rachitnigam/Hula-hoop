@@ -17,13 +17,14 @@ const bit<32> EGDE_HOSTS = 4;
 
 /* Declaration for the various packet types. */
 const bit<16> TYPE_IPV4 = 0x800;
-const bit<8> TYPE_HULA = 0x42;
-const bit<32> MAX_TUNNEL_ID = 1 << 16;
-const bit<32> MULTICAST = 0xe0000001;
+const bit<8> PROTO_HULA = 0x42;
+const bit<8> PROTO_TCP = 0x06;
 
 /* Tracking things for flowlets */
-const time_t FLOWLET_TOUT = 3000;
-const time_t KEEP_ALIVE_THRESH = 10000;
+const time_t FLOWLET_TOUT = 48w1 << 3;
+const util_t PROBE_FREQ_FACTOR = 6;
+const time_t KEEP_ALIVE_THRESH = 48w1 << PROBE_FREQ_FACTOR;
+const time_t PROBE_FREQ = 48w1 << PROBE_FREQ_FACTOR; // Here for documentation. Unused.
 
 /*************************************************************************
 *********************** H E A D E R S  ***********************************
@@ -55,8 +56,21 @@ header ipv4_t {
     ip4Addr_t dstAddr;
 }
 
+header tcp_t {
+  bit<16> srcPort;
+  bit<16> dstPort;
+  bit<32> seq;
+  bit<32> ack;
+  bit<4> dataofs;
+  bit<3> reserved;
+  bit<9> flags;
+  bit<32> window;
+  bit<16> chksum;
+  bit<16> urgptr;
+}
+
 struct metadata {
-    bit<8> nxt_hop;
+    bit<9> nxt_hop;
     bit<32> self_id;
     bit<32> dst_tor;
 }
@@ -64,6 +78,7 @@ struct metadata {
 struct headers {
     ethernet_t   ethernet;
     ipv4_t       ipv4;
+    tcp_t        tcp;
     hula_t       hula;
 }
 
@@ -91,13 +106,19 @@ parser MyParser(packet_in packet,
     state parse_ipv4 {
         packet.extract(hdr.ipv4);
         transition select(hdr.ipv4.protocol) {
-          TYPE_HULA: parse_hula;
+          PROTO_HULA: parse_hula;
+          PROTO_TCP: parse_tcp;
           default: accept;
         }
     }
 
     state parse_hula {
         packet.extract(hdr.hula);
+        transition accept;
+    }
+
+    state parse_tcp {
+        packet.extract(hdr.tcp);
         transition accept;
     }
 
@@ -124,7 +145,9 @@ control MyIngress(inout headers hdr,
 
     // Keep track of the port utilization
     register<util_t>((bit<32>) NUM_PORTS) port_util;
-    // Keep track of the last time port utilization was updated for a dst_tor
+    // Last time port_util was updated for a port.
+    register<time_t>((bit<32>) NUM_PORTS) port_util_last_updated;
+    // Keep track of the last time a probe from dst_tor came.
     register<time_t>((bit<32>) NUM_TORS) update_time;
     // Best hop for for each tor
     register<port_id_t>((bit<32>) NUM_TORS) best_hop;
@@ -135,46 +158,100 @@ control MyIngress(inout headers hdr,
     // Keep track of the minimum utilized path
     register<util_t>((bit<32>) NUM_TORS) min_path_util;
 
-    /******************************************************/
-
-    counter(MAX_TUNNEL_ID, CounterType.packets_and_bytes) ingressTunnelCounter;
-    counter(MAX_TUNNEL_ID, CounterType.packets_and_bytes) egressTunnelCounter;
-
     action drop() {
         mark_to_drop();
     }
 
-    /*
-    action hula_logic(ipv4_t ipv4_header, hula_t hula_hdr) {
+    /******************************************************/
+
+    /**** Core HULA logic *****/
+
+    action hula_handle_probe() {
         time_t curr_time = standard_metadata.ingress_global_timestamp;
-        bit<32> dst_tor = (bit<32>) hula_hdr.dst_tor;
+        bit<32> dst_tor = (bit<32>) hdr.hula.dst_tor;
+
+        util_t tx_util;
+        util_t mpu;
+        time_t up_time;
+
+        port_util.read(tx_util, (bit<32>) standard_metadata.ingress_port);
+        min_path_util.read(mpu, dst_tor);
+        update_time.read(up_time, dst_tor);
+
+        // If the current link util is higher, then that is the path util.
+        if(hdr.hula.path_util < tx_util) {
+            hdr.hula.path_util = tx_util;
+        }
+
+        // If the path util from probe is lower than minimum path util,
+        // update best hop.
+        bool cond = (hdr.hula.path_util < mpu || curr_time - up_time > KEEP_ALIVE_THRESH);
+
+        mpu = cond ? hdr.hula.path_util : mpu;
+        min_path_util.write(dst_tor, mpu);
+
+        up_time = cond ? curr_time : up_time;
+        update_time.write(dst_tor, up_time);
+
+        port_id_t bh_temp;
+        best_hop.read(bh_temp, dst_tor);
+        bh_temp = cond ? standard_metadata.ingress_port : bh_temp;
+        best_hop.write(dst_tor, bh_temp);
+
+
+        min_path_util.read(mpu, dst_tor);
+        hdr.hula.path_util = mpu;
+    }
+
+    action hula_handle_data_packet() {
+        time_t curr_time = standard_metadata.ingress_global_timestamp;
+        bit<32> dst_tor = (bit<32>) hdr.hula.dst_tor;
 
         util_t tx_util;
         port_util.read(tx_util, (bit<32>) standard_metadata.ingress_port);
 
-        // Process a HULA probe
-        if (ipv4_header.protocol == TYPE_HULA) {
-            util_t mpu; time_t up_time;
-            min_path_util.read(mpu, dst_tor);
-            update_time.read(up_time, dst_tor);
+        bit<32> flow_hash;
+        time_t flow_t;
+        port_id_t flow_h;
+        port_id_t best_h;
 
-            if(hula_hdr.path_util < tx_util) hula_hdr.path_util = tx_util;
+        hash(flow_hash, HashAlgorithm.csum16, 32w0, {
+            hdr.ipv4.srcAddr,
+            hdr.ipv4.dstAddr,
+            hdr.ipv4.protocol,
+            hdr.tcp.srcPort,
+            hdr.tcp.dstPort
+        }, 32w1 << 10 - 1);
 
-            if(hula_hdr.path_util < hula_hdr.path_util ||
-               curr_time - up_time > KEEP_ALIVE_THRESH) {
+        flowlet_time.read(flow_t, flow_hash);
 
-                min_path_util.write(dst_tor, hula_hdr.path_util);
-                best_hop.write(dst_tor, standard_metadata.ingress_port);
-                update_time.write(dst_tor, curr_time);
-            }
+        /*if (curr_time - flow_t > FLOWLET_TOUT) {*/
+        best_hop.read(best_h, meta.dst_tor);
+        port_id_t tmp;
+        flowlet_hop.read(tmp, flow_hash);
+        tmp = (curr_time - flow_t > FLOWLET_TOUT) ? best_h : tmp;
+        flowlet_hop.write(flow_hash, tmp);
+        /*}*/
 
-            min_path_util.read(mpu, dst_tor);
-            hdr.hula.path_util = mpu;
-        }
-        else {
-        }
+        flowlet_hop.read(flow_h, flow_hash);
+        standard_metadata.egress_spec = flow_h;
+        flowlet_time.write(flow_hash, curr_time);
     }
-    */
+
+    table hula_logic {
+        key = {
+          hdr.ipv4.protocol: exact;
+        }
+        actions = {
+          hula_handle_probe;
+          hula_handle_data_packet;
+          drop;
+        }
+        size = 4;
+        default_action = drop();
+    }
+
+    /***********************************************/
 
     /***** Implement mapping from dstAddr to dst_tor ********/
     // Uses the destination address to compute the destination tor and the id of
@@ -222,14 +299,36 @@ control MyIngress(inout headers hdr,
 
     /******************************************************/
 
+    action update_ingress_statistics() {
+      util_t util;
+      time_t last_update;
+
+      time_t curr_time = standard_metadata.ingress_global_timestamp;
+      bit<32> port= (bit<32>) standard_metadata.ingress_port;
+
+      port_util.read(util, port);
+      port_util_last_updated.read(last_update, port);
+
+      bit<8> delta_t = (bit<8>) (curr_time - last_update);
+      util = (((bit<8>) standard_metadata.packet_length + util) << PROBE_FREQ_FACTOR) - delta_t;
+      util = util >> PROBE_FREQ_FACTOR;
+
+      port_util.write(port, util);
+      port_util_last_updated.write(port, curr_time);
+    }
+
     apply {
         drop();
         get_dst_tor.apply();
-        if (hdr.hula.isValid()) {
-          standard_metadata.mcast_grp = (bit<16>)standard_metadata.ingress_port;
-        }
-        if (meta.dst_tor == meta.self_id) {
-            edge_forward.apply();
+        update_ingress_statistics();
+        if (hdr.ipv4.isValid()) {
+          hula_logic.apply();
+          if (hdr.hula.isValid()) {
+            standard_metadata.mcast_grp = (bit<16>)standard_metadata.ingress_port;
+          }
+          if (meta.dst_tor == meta.self_id) {
+              edge_forward.apply();
+          }
         }
     }
 }
@@ -276,6 +375,7 @@ control MyDeparser(packet_out packet, in headers hdr) {
     apply {
         packet.emit(hdr.ethernet);
         packet.emit(hdr.ipv4);
+        packet.emit(hdr.tcp);
         packet.emit(hdr.hula);
     }
 }

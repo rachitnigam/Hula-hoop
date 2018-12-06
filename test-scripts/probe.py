@@ -4,6 +4,7 @@ import sys
 import socket
 import random
 import struct
+import time
 
 from scapy.all import sendp, send, get_if_list, get_if_hwaddr, bind_layers
 from scapy.all import Packet, BitField, Raw
@@ -40,7 +41,11 @@ def main():
     pkt = pkt / Hula(dst_tor=dt, path_util=256)
     pkt = pkt / Raw("probe packet")
     pkt.show2()
-    sendp(pkt, iface=iface, verbose=False)
+
+    # Keep sending probes
+    while True:
+        sendp(pkt, iface=iface, verbose=False)
+        time.sleep(1)
 
 
 if __name__ == '__main__':

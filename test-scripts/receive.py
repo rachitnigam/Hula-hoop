@@ -39,12 +39,10 @@ class Hula(Packet):
                    BitField("path_util", 0, 8)]
 
 def handle_pkt(pkt):
-    # if TCP in pkt and pkt[TCP].dport == 1234:
     print "++++++++++++"
     print "got a packet"
     print "++++++++++++"
     pkt.show2()
-#    hexdump(pkt)
     sys.stdout.flush()
 
 bind_layers(IP, Hula, proto=66)

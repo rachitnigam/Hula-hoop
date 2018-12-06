@@ -1,2 +1,6 @@
 *.pyc
 *~
+build/
+config/
+logs/
+pcaps/

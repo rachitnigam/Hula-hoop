@@ -141,7 +141,8 @@ h10 from five hosts.
 
 #### JSON data
 
-TODO: Point to the JSON data collected.
+For benchmarking, I collected 60 snapshots of the network state at an interval
+of 0.5 seconds. The collected data is in `data/data.json`.
 
 #### Evaluate
 

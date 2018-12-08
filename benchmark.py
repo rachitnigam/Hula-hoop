@@ -10,24 +10,29 @@ from p4runtime_lib.switch import ShutdownAllSwitchConnections
 from p4runtime_lib.convert import decodeMac, decodeIPv4
 from switch_utils import printGrpcError,load_topology,run_ssc_cmd
 
-snapshot_best_hop_cmd = """
-register_read MyIngress.best_hop 100
-register_read MyIngress.best_hop 101
-register_read MyIngress.best_hop 102
-register_read MyIngress.best_hop 103
-register_read MyIngress.best_hop 104
-register_read MyIngress.best_hop 105
-register_read MyIngress.best_hop 106
-register_read MyIngress.best_hop 107
-"""
+switch_reg = re.compile(r"^s(\d+)$")
+
+def generate_register_reads(register_name, indices):
+    cmd = ""
+    for idx in indices:
+        cmd += "register_read MyIngress.%s %d\n" % (register_name, idx)
+    return cmd
+
+
+snapshot_best_hop_cmd = generate_register_reads('best_hop', [100, 101, 102,
+                                                             103, 104, 105,
+                                                             106, 107])
+
+snapshot_port_util_cmd = generate_register_reads('port_util', [0, 1, 2, 3, 4, 5, 6])
 
 process_best_hop_regex = re.compile(".*hop\[(\d+)\]\s*=\s*(\d+)")
+process_port_util_regex = re.compile(".*util\[(\d+)\]\s*=\s*(\d+)")
 
-def process_and_output(output):
+def process_and_output(output, reg):
     best_hops = {}
 
     for line in output.split("\n"):
-        match = process_best_hop_regex.search(line)
+        match = reg.search(line)
         if match:
             best_hops[match.group(1)] = match.group(2)
 
@@ -37,11 +42,16 @@ def benchmark(mn_topo, switches, bench_switches, interval, count):
     data = []
     c = count
     while c > 0:
-        snapshot = {'count': count - c, 'snapshot': {}}
+        snapshot = {'count': count - c, 'best_hops': {}, 'port_util': {}}
         for switch in bench_switches:
             out = run_ssc_cmd(switch,snapshot_best_hop_cmd, False)
-            best_hops = process_and_output(out)
-            snapshot['snapshot'][switch] = best_hops
+            best_hops = process_and_output(out, process_best_hop_regex)
+            snapshot['best_hops'][switch] = best_hops
+
+            out = run_ssc_cmd(switch,snapshot_port_util_cmd, False)
+            port_util = process_and_output(out, process_port_util_regex)
+            snapshot['port_util'][switch] = port_util
+
         c -= 1
         data.append(snapshot.copy())
         sleep(interval)

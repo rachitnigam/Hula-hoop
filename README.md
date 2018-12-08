@@ -136,8 +136,18 @@ switch at runtime.
 
 #### Initial Setup
 
-TODO: Talk about how I created load. Run probe on each rack, and send messages to
-h10 from five hosts.
+For this evaluation I ended up creating a synthetic load to test the port utilization.
+To reproduce, follow these steps:
+
+- Run `make` followed by `./controller.py` to setup the network.
+- On hosts h1, h3, h5, h7, h9, h11, h13, h15, run `./test-scripts/probe.py &` to
+  start sending probes.
+- Run `./test-scripts/send.py 10.0.104.9 'message'` on hosts h1, h3, h5, h7, and,
+  h11.
+
+A more realistic load balancing test could be created using one of the
+datacenter TCP dumps. However, due to time constraints, I was not able to look
+into this.
 
 #### JSON data
 

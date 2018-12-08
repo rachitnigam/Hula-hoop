@@ -103,7 +103,7 @@ of the packet, `dt` is the time since last update, and `t` is a constant.
 
 ## Evaluation
 
-### Coping with link failures
+### Manual: Coping with link failures
 
 We'll be working with `h1`, `h2`, and the switches that connect. If you'd like to
 use a different pair of hosts, take a look at `./topology-generation/foo.png` to
@@ -127,6 +127,25 @@ figure out which switches connect them.
   now a path from `h1` to `h10`.
 - After a short delay, note that packet from `h1` have started arriving to `h10`.
   The HULA probes have detected and coped with link failures!
+
+### Port utilization
+
+To evaluate the port utilization of each switch under load, I wrote the
+`benchmark.py` script which snapshots the state of various registers on each
+switch at runtime.
+
+#### Initial Setup
+
+TODO: Talk about how I created load. Run probe on each rack, and send messages to
+h10 from five hosts.
+
+#### JSON data
+
+TODO: Point to the JSON data collected.
+
+#### Evaluate
+
+TODO: Talk about the data collected.
 
 ## Experience with P4
 

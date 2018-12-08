@@ -40,7 +40,6 @@ def main():
     dt = int(pkt[IP].src.split(".")[2])
     pkt = pkt / Hula(dst_tor=dt, path_util=256)
     pkt = pkt / Raw("probe packet")
-    pkt.show2()
 
     # Keep sending probes
     while True:

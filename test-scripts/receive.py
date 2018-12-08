@@ -2,6 +2,7 @@
 import sys
 import struct
 import os
+import argparse
 
 from scapy.all import sniff, sendp, hexdump, get_if_list, get_if_hwaddr, bind_layers
 from scapy.all import Packet, IPOption
@@ -38,22 +39,29 @@ class Hula(Packet):
     fields_desc = [ BitField("dst_tor", 0, 24),
                    BitField("path_util", 0, 8)]
 
-def handle_pkt(pkt):
-    print "++++++++++++"
-    print "got a packet"
-    print "++++++++++++"
-    pkt.show2()
-    sys.stdout.flush()
+def handle_pkt(pkt, show_probes):
+    if pkt.haslayer(Hula) and not show_probes:
+        return
+    else:
+        pkt.show2()
+        sys.stdout.flush()
 
 bind_layers(IP, Hula, proto=66)
 
+def get_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-p', '--show-probes', help='Parse and show probe packets',
+                        action='store_true', required=False, default=False)
+    return parser.parse_args()
+
 def main():
+    args = get_args()
     ifaces = filter(lambda i: 'eth' in i, os.listdir('/sys/class/net/'))
     iface = ifaces[0]
     print "sniffing on %s" % iface
     sys.stdout.flush()
     sniff(iface = iface,
-          prn = lambda x: handle_pkt(x))
+          prn = lambda x: handle_pkt(x, args.show_probes))
 
 if __name__ == '__main__':
     main()

@@ -55,18 +55,14 @@ def mk_topo(pods, bw='1Gbps'):
             for port in range(pods/2, pods):
                 core_switch = core_switches[core_offset][0]
                 g.add_edge(switch,core_switch)
-                           # src_port=port, dst_port=pod, capacity=bw, cost=1)
                 g.add_edge(core_switch,switch)
-                           # src_port=pod, dst_port=port, capacity=bw, cost=1)
                 core_offset += 1
 
             # Connect to aggregate switches in same pod
             for port in range(pods/2):
                 lower_switch = agg_switches[(pod*pods) + port][0]
                 g.add_edge(switch,lower_switch)
-                           # src_port=port, dst_port=sw, capacity=bw, cost=1)
                 g.add_edge(lower_switch,switch)
-                           # src_port=sw, dst_port=port, capacity=bw, cost=1)
 
         for sw in range(pods/2):
             switch = agg_switches[(pod*pods) + sw][0]
@@ -75,9 +71,7 @@ def mk_topo(pods, bw='1Gbps'):
                 host = hosts[host_offset][0]
                 # All hosts connect on port 0
                 g.add_edge(switch,host)
-                           # src_port=port, dst_port=0, capacity=bw, cost=1)
                 g.add_edge(host,switch)
-                           # src_port=0, dst_port=port, capacity=bw, cost=1)
                 host_offset += 1
 
     a = nx.nx_agraph.to_agraph(g)
@@ -117,5 +111,4 @@ if __name__ == '__main__':
         for switch in sws:
             switches[switch] = {}
         topology = {"hosts": hosts, "switches": switches, "links": links}
-        # print json.dumps(topology, sort_keys=True, indent=4, separators=(',', ': '))
-        print topo
+        print json.dumps(topology, sort_keys=True, indent=4, separators=(',', ': '))

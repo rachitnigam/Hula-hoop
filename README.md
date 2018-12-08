@@ -19,11 +19,13 @@ The switches are now configured, however, at this point, the hosts don't have
 routes to hosts not on their rack. To establish a route to a host `hn`:
 
 - Run `xterm hn` from mininet CLI.
-- In the terminal, run `./test-scripts/probe.py`
+- In the terminal, run `./test-scripts/probe.py`. This script sends probes from
+  the current host every `1s`.
 
 This will send a probe from `hn` to every other node and establish a path to
-`hn` from every other node. Repeat this for all node to establish a connection
-to them.
+`hn` from every other node. It will also establish a path to every other host
+connected the same ToR as `hn`. Repeat this for all node to establish a
+connection to them.
 
 Use the `./test-scripts/receieve` and `./test-script/send` script to view
 incoming packets and send packets to other hosts respectively.

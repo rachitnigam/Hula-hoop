@@ -37,8 +37,8 @@ strict graph G {
   { rank=same; s102; s107; s100; s103; s104; s105; s106; s101; }
   { rank=min; s302; s303; s300; s301;}
 
+  s100 -- s101 -- s102 -- s103 -- s104 -- s105 -- s106 -- s107 [style=invis];
   s300 -- s301 -- s302 -- s303 [style=invis]
-  h1 -- h2 -- h3 -- h4 -- h5 -- h6 -- h7 -- h8 -- h9 -- h10 -- h11 -- h12 -- h13 -- h14 -- h15 -- h16 [style=invis];
 
   // %%PATH%%
 

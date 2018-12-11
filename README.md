@@ -163,7 +163,7 @@ we I generated a visualization of the best path from two hosts (h1 and h5) to
 h9. As the visualization shows, the load balancing scheme switches to paths
 with lower link utilization under load.
 
-[[https://github.com/rachitnigam/Hula-hoop/blob/master/data/paths.gif|alt=GIF of network state]]
+![GIF of network state](https://raw.githubusercontent.com/rachitnigam/Hula-hoop/master/data/paths.gif)
 
 ## Experience with P4
 

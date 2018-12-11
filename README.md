@@ -103,7 +103,7 @@ of the packet, `dt` is the time since last update, and `t` is a constant.
 
 ## Evaluation
 
-### Manual: Coping with link failures
+### Coping with link failures
 
 We'll be working with `h1`, `h2`, and the switches that connect. If you'd like to
 use a different pair of hosts, take a look at `./topology-generation/foo.png` to
@@ -152,11 +152,18 @@ into this.
 #### JSON data
 
 For benchmarking, I collected 60 snapshots of the network state at an interval
-of 0.5 seconds. The collected data is in `data/data.json`.
+of 0.5 seconds. The collected data is in `data/data.json`. Each snapshot contains
+the current state of the `best_hops` register and the `port_util` register.
 
 #### Evaluate
 
-TODO: Talk about the data collected.
+The HULA paper generated multiple graphs to compare the load balancing
+characteristics of the alogrithm with ECMP and CONGA scheme. For my evaluation,
+we I generated a visualization of the best path from two hosts (h1 and h5) to
+h9. As the visualization shows, the load balancing scheme switches to paths
+with lower link utilization under load.
+
+![GIF showing network state][./data/paths.gif]
 
 ## Experience with P4
 

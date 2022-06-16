@@ -159,7 +159,7 @@ control MyIngress(inout headers hdr,
     register<util_t>((bit<32>) NUM_TORS) min_path_util;
 
     action drop() {
-        mark_to_drop();
+        mark_to_drop(standard_metadata);
     }
 
     /******************************************************/
